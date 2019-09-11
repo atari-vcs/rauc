@@ -1,0 +1,19 @@
+rauc (1.1-2) unstable; urgency=medium
+
+  [ Uwe Kleine-König ]
+  * Cherry pick fix from upstream that removes a wrong test that made rauc
+    FTBFS. (commit: 35c98ab18f)
+  * Cherry pick fix from upstream that makes rauc work on big endian.
+    (commit: bc25067177)
+  * Another test fix by Enrico Jörns from
+    https://github.com/rauc/rauc/pull/476.
+  * The three above changes fix rauc's testsuite and so make rauc build again.
+    (Closes: #939975)
+
+ -- Arnaud Rebillout <arnaud.rebillout@collabora.com>  Wed, 11 Sep 2019 07:45:32 +0700
+
+rauc (1.1-1) unstable; urgency=medium
+
+  * Initial release (Closes: #916210)
+
+ -- Arnaud Rebillout <arnaud.rebillout@collabora.com>  Fri, 14 Jun 2019 09:06:06 +0700

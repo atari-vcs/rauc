@@ -1,0 +1,6 @@
+src-bundle-fix-bundle-detection-on-big-endian-system.patch
+test-install-deactivate-check-that-depends-on-GHashT.patch
+test-install-fix-test-for-undefined-behavior-in-slot.patch
+test-install-fix-missing-pre-set-of-bootslot.patch
+disable-network-tests.patch
+install-wrapper-to-pkgdatadir.patch

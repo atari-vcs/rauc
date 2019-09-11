@@ -1,0 +1,2 @@
+# some of these are missing in upstream's release tar ball, see https://github.com/rauc/rauc/pull/449
+extend-diff-ignore = (^|/)(contrib/cgi/(autogen.sh|m4/.*\.m4)|contrib/cgi/src/rauc-installer.xml|contrib/cgi/build-aux/git-version-gen|.tarball-version|rauc-installer-generated.h|rauc_logo(_small)?.png|.travis.yml|.lgtm.yml|test/|Makefile.in|aclocal.m4|autogen.sh|build-aux/|configure|docs/|.version|m4/libtool.m4|uml-test(-init)?)

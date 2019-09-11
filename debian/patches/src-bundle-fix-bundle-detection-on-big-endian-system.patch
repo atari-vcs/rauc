@@ -1,0 +1,27 @@
+From: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Date: Tue, 23 Jul 2019 11:29:04 +0200
+Subject: [PATCH] src/bundle: fix bundle detection on big endian systems
+
+The squashfs magic is contained in little endian order in the image. To
+be able to detect it correctly on big endian systems, the magic value
+needs its endianess switched to properly compare with the respective
+value found using read(2) from the image.
+
+Reported-by: Dominik Schorpp <Dominik.A.Schorpp@ids.de>
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Origin: upstream, commit:bc2506717737fae49a5ea4f13b3af634c099dd3f
+---
+ src/bundle.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/src/bundle.c
++++ b/src/bundle.c
+@@ -248,7 +248,7 @@
+ 	return res;
+ }
+ 
+-#define SQUASHFS_MAGIC			0x73717368
++#define SQUASHFS_MAGIC			GUINT32_TO_LE(0x73717368)
+ 
+ /* Attempts to read and verify the squashfs magic to verify having a valid bundle */
+ static gboolean input_stream_check_bundle_identifier(GInputStream *stream, GError **error)

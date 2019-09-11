@@ -1,0 +1,32 @@
+From bca21c453820fc0b79ea210499f9c3f780e41ec5 Mon Sep 17 00:00:00 2001
+From: Enrico Joerns <ejo@pengutronix.de>
+Date: Sun, 8 Sep 2019 00:00:51 +0200
+Subject: [PATCH] test/install: fix missing pre-set of bootslot
+
+This test lacked proper setting of 'bootslot' context property which is
+required for a realiable test of determine_slot_states().
+
+Up to now, the property was only set correctly by the previously
+executed test. Someting we should not rely on...
+
+Signed-off-by: Enrico Joerns <ejo@pengutronix.de>
+---
+ test/install.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/test/install.c b/test/install.c
+index b28755d302de..5929d5a287a8 100644
+--- a/test/install.c
++++ b/test/install.c
+@@ -257,6 +257,8 @@ filename=bootloader.img";
+ 
+ 	g_assert_true(load_manifest_file(pathname, &rm, NULL));
+ 
++	r_context_conf()->bootslot = g_strdup("system0");
++
+ 	g_assert_true(determine_slot_states(NULL));
+ 
+ 	g_assert_nonnull(r_context()->config);
+-- 
+2.23.0
+

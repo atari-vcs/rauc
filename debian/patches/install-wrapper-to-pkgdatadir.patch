@@ -1,0 +1,20 @@
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -94,7 +94,7 @@
+ dbuspolicydir = $(DBUS_POLICYDIR)
+ dist_dbuspolicy_DATA = data/de.pengutronix.rauc.conf
+ 
+-dbuswrapperdir = $(libexecdir)
++dbuswrapperdir = $(pkgdatadir)
+ nodist_dbuswrapper_SCRIPTS = data/rauc-service.sh
+ 
+ EXTRA_DIST += data/rauc.service.in \
+--- a/data/de.pengutronix.rauc.service.in
++++ b/data/de.pengutronix.rauc.service.in
+@@ -1,5 +1,5 @@
+ [D-BUS Service]
+ Name=de.pengutronix.rauc
+-Exec=@libexecdir@/rauc-service.sh
++Exec=@datadir@/rauc-service.sh
+ User=root
+ SystemdService=rauc.service
