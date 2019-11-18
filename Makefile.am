@@ -42,9 +42,11 @@ librauc_la_SOURCES = \
 	src/install.c \
 	src/manifest.c \
 	src/mark.c \
+	src/mbr.c \
 	src/mount.c \
 	src/service.c \
 	src/signature.c \
+	src/slot.c \
 	src/utils.c \
 	src/update_handler.c \
 	include/bootchooser.h \
@@ -56,9 +58,11 @@ librauc_la_SOURCES = \
 	include/install.h \
 	include/manifest.h \
 	include/mark.h \
+	include/mbr.h \
 	include/mount.h \
 	include/service.h \
 	include/signature.h \
+	include/slot.h \
 	include/update_handler.h \
 	include/utils.h
 
@@ -88,8 +92,8 @@ systemdunitdir=$(SYSTEMD_UNITDIR)
 nodist_systemdunit_DATA = data/rauc.service
 endif
 
-dbussystemdir = $(DBUS_SYSTEMSERVICEDIR)
-nodist_dbussystem_DATA = data/de.pengutronix.rauc.service
+dbussystemservicedir = $(DBUS_SYSTEMSERVICEDIR)
+nodist_dbussystemservice_DATA = data/de.pengutronix.rauc.service
 
 dbuspolicydir = $(DBUS_POLICYDIR)
 dist_dbuspolicy_DATA = data/de.pengutronix.rauc.conf
@@ -105,7 +109,9 @@ EXTRA_DIST += data/rauc.service.in \
 	      contrib \
 	      build-uncrustify.sh \
 	      .uncrustify.cfg \
-	      uncrustify.sh
+	      uncrustify.sh \
+	      rauc_logo.png \
+	      rauc_logo_small.png
 
 dist_man_MANS = rauc.1
 
@@ -128,7 +134,8 @@ check_PROGRAMS = \
 	test/install.test \
 	test/service.test \
 	test/bundle.test \
-	test/progress.test
+	test/progress.test \
+	test/slot.test
 
 if WANT_NETWORK
 check_PROGRAMS += test/network.test
@@ -142,15 +149,22 @@ check_LTLIBRARIES = librauctest.la
 
 EXTRA_DIST += tap-t \
 	      tap-test \
+	      uml-test uml-test-init \
+	      test/Dockerfile \
 	      test/bin \
 	      test/install-content \
 	      test/openssl-ca \
-	      test/manifest.raucm \
+	      $(wildcard test/*.raucb) \
+	      $(wildcard test/*.raucm) \
 	      test/rauc.t \
 	      test/rootfs.raucs \
 	      test/sharness.sh \
+	      test/system.conf \
 	      test/test.conf \
-	      test/test-global.conf
+	      test/test-global.conf \
+	      test/get-coverity.sh \
+	      test/openssl-ca.sh \
+	      test/run-coverity.sh
 
 librauctest_la_SOURCES = \
 	test/common.c \
@@ -195,6 +209,9 @@ test_network_test_LDADD = librauctest.la
 test_progress_test_SOURCES = test/progress.c
 test_progress_test_LDADD = librauctest.la
 
+test_slot_test_SOURCES = test/slot.c
+test_slot_test_LDADD = librauctest.la
+
 SED_REPLACE = $(SED) \
        -e 's|[@]bindir[@]|$(bindir)|g' \
        -e 's|[@]libexecdir[@]|$(libexecdir)|g' \
@@ -221,13 +238,17 @@ doc:
 EXTRA_DIST += docs/conf.py
 EXTRA_DIST += docs/images
 EXTRA_DIST += docs/extensions
+EXTRA_DIST += docs/release-checklist.txt
 EXTRA_DIST += $(wildcard docs/*.rst)
 
-AM_DISTCHECK_CONFIGURE_FLAGS = "--without-systemdunitdir"
+AM_DISTCHECK_CONFIGURE_FLAGS = \
+    --with-systemdunitdir=$$dc_install_base/$(systemdunitdir) \
+    --with-dbuspolicydir=$$dc_install_base/$(dbuspolicydir) \
+    --with-dbussystemservicedir=$$dc_install_base/$(dbussystemservicedir)
 
 CLEANFILES = $(gdbus_installer_generated) \
 	     $(nodist_systemdunit_DATA) \
-	     $(nodist_dbussystem_DATA) \
+	     $(nodist_dbussystemservice_DATA) \
 	     $(nodist_dbuswrapper_SCRIPTS) \
 	     data/rauc.service \
 	     test/empty.dat \

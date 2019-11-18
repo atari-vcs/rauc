@@ -9,6 +9,30 @@
 
 #include "utils.h"
 
+GSubprocess *r_subprocess_new(GSubprocessFlags flags, GError **error, const gchar *argv0, ...)
+{
+	GSubprocess *result;
+	g_autoptr(GPtrArray) args = NULL;
+	const gchar *arg;
+	va_list ap;
+
+	g_return_val_if_fail(argv0 != NULL && argv0[0] != '\0', NULL);
+	g_return_val_if_fail(error == NULL || *error == NULL, NULL);
+
+	args = g_ptr_array_new();
+
+	va_start(ap, argv0);
+	g_ptr_array_add(args, (gchar *) argv0);
+	while ((arg = va_arg(ap, const gchar *)))
+		g_ptr_array_add(args, (gchar *) arg);
+	g_ptr_array_add(args, NULL);
+	va_end(ap);
+
+	result = r_subprocess_newv(args, flags, error);
+
+	return result;
+}
+
 void close_preserve_errno(int fd)
 {
 	int err;
@@ -108,7 +132,6 @@ gchar *resolve_path(const gchar *basefile, gchar *path)
 {
 	g_autofree gchar *cwd = NULL;
 	g_autofree gchar *dir = NULL;
-	g_autofree gchar *res = NULL;
 
 	if (path == NULL)
 		return NULL;
@@ -186,3 +209,45 @@ gchar * key_file_consume_string(
 	return result;
 }
 
+guint64 key_file_consume_binary_suffixed_string(GKeyFile *key_file,
+		const gchar *group_name,
+		const gchar *key,
+		GError **error)
+{
+	g_autofree gchar *string = NULL;
+	guint64 result;
+	gchar *scale;
+	guint scale_shift = 0;
+	GError *ierror = NULL;
+
+	string = key_file_consume_string(key_file, group_name, key, &ierror);
+	if (!string) {
+		g_propagate_error(error, ierror);
+		return 0;
+	}
+
+	result = g_ascii_strtoull(string, &scale, 10);
+
+	if (result == 0)
+		return result;
+
+	switch (*scale | 0x20) {
+		case 'k':
+			scale_shift = 10;
+			break;
+		case 'm':
+			scale_shift = 20;
+			break;
+		case 'g':
+			scale_shift = 30;
+			break;
+		case 't':
+			scale_shift = 40;
+			break;
+		default:
+			scale_shift = 0;
+			break;
+	}
+
+	return (result << scale_shift);
+}

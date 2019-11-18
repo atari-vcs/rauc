@@ -1,3 +1,16 @@
+rauc (1.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Drop patches applied upstream, update remaining patches.
+  * Add upstream patch to fix typos.
+  * Add build dependency on libdbus-dev.
+  * Update extend-diff-ignore in d/source/options.
+  * Update standards version to 4.4.0.
+  * Update upstream copyright years.
+  * Add "Rules-Requires-Root: no" to d/control.
+
+ -- Arnaud Rebillout <arnaud.rebillout@collabora.com>  Mon, 18 Nov 2019 17:32:05 +0700
+
 rauc (1.1-2) unstable; urgency=medium
 
   [ Uwe Kleine-König ]

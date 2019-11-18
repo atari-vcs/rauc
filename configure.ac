@@ -44,6 +44,7 @@ AC_ARG_ENABLE([service],
 )
 AS_IF([test "x$enable_service" != "xno"], [
 	AC_DEFINE([ENABLE_SERVICE], [1], [Define to 1 to enable background service])
+	PKG_CHECK_MODULES([DBUS1], [dbus-1])
 ], [
 	AC_DEFINE([ENABLE_SERVICE], [0])
 ])
@@ -77,9 +78,10 @@ AS_IF([test "x$enable_json" != "xno"], [
 
 AX_CHECK_OPENSSL([],[AC_MSG_ERROR([OpenSSL not found])])
 
-AC_ARG_WITH([systemdunitdir], AC_HELP_STRING([--with-systemdunitdir=DIR],
-	[path to systemd service directory]), [with_systemdunitdir=${withval}],
-		[with_systemdunitdir="`$PKG_CONFIG --variable=systemdsystemunitdir systemd`"])
+AC_ARG_WITH([systemdunitdir],
+        AC_HELP_STRING([--with-systemdunitdir=DIR], [path to systemd service directory]),
+        [],
+        [with_systemdunitdir="$($PKG_CONFIG --variable=systemdsystemunitdir systemd)"])
 if (test -n "${with_systemdunitdir}"); then
 	SYSTEMD_UNITDIR="${with_systemdunitdir}"
 	AC_SUBST(SYSTEMD_UNITDIR)
@@ -89,14 +91,14 @@ AM_CONDITIONAL(SYSTEMD, test -n "${with_systemdunitdir}")
 AC_ARG_WITH([dbuspolicydir],
         AS_HELP_STRING([--with-dbuspolicydir=DIR], [D-Bus policy directory]),
         [],
-        [with_dbuspolicydir=${datadir}/dbus-1/system.d])
+        [with_dbuspolicydir="$($PKG_CONFIG --variable=datadir dbus-1)/dbus-1/system.d"])
 DBUS_POLICYDIR="${with_dbuspolicydir}"
 AC_SUBST(DBUS_POLICYDIR)
 
 AC_ARG_WITH([dbussystemservicedir],
         AS_HELP_STRING([--with-dbussystemservicedir=DIR], [D-Bus system service directory]),
         [],
-        [with_dbussystemservicedir=${datadir}/dbus-1/system-services])
+        [with_dbussystemservicedir="$($PKG_CONFIG --variable=system_bus_services_dir dbus-1)"])
 DBUS_SYSTEMSERVICEDIR="${with_dbussystemservicedir}"
 AC_SUBST(DBUS_SYSTEMSERVICEDIR)
 
@@ -132,6 +134,7 @@ AC_CONFIG_LINKS([test/openssl-ca/dev/autobuilder-2.cert.pem:test/openssl-ca/dev/
 AC_CONFIG_LINKS([test/openssl-ca/dev/private/autobuilder-1.pem:test/openssl-ca/dev/private/autobuilder-1.pem])
 AC_CONFIG_LINKS([test/openssl-ca/dev/private/autobuilder-2.pem:test/openssl-ca/dev/private/autobuilder-2.pem])
 AC_CONFIG_LINKS([test/openssl-ca/dev-ca.pem:test/openssl-ca/dev-ca.pem])
+AC_CONFIG_LINKS([test/openssl-ca/dev-only-ca.pem:test/openssl-ca/dev-only-ca.pem])
 AC_CONFIG_LINKS([test/openssl-ca/rel-ca.pem:test/openssl-ca/rel-ca.pem])
 AC_CONFIG_LINKS([test/openssl-ca/provisioning-ca.pem:test/openssl-ca/provisioning-ca.pem])
 AC_CONFIG_LINKS([test/openssl-ca/rel/release-1.cert.pem:test/openssl-ca/rel/release-1.cert.pem])

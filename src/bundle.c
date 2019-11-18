@@ -29,7 +29,7 @@ static gboolean mksquashfs(const gchar *bundlename, const gchar *contentdir, GEr
 		goto out;
 	}
 
-	sproc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_SILENCE,
+	sproc = r_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_SILENCE,
 			&ierror, "mksquashfs",
 			contentdir,
 			bundlename,
@@ -82,9 +82,7 @@ static gboolean unsquashfs(const gchar *bundlename, const gchar *contentdir, con
 
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -150,9 +148,7 @@ static gboolean casync_make_arch(const gchar *idxpath, const gchar *contentpath,
 	g_ptr_array_add(args, g_strjoinv(" ", (gchar**) g_ptr_array_free(iargs, FALSE)));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -192,9 +188,7 @@ static gboolean casync_make_blob(const gchar *idxpath, const gchar *contentpath,
 	}
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_STDOUT_SILENCE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -248,7 +242,7 @@ static gboolean input_stream_read_uint64_all(GInputStream *stream,
 	return res;
 }
 
-#define SQUASHFS_MAGIC			0x73717368
+#define SQUASHFS_MAGIC			GUINT32_TO_LE(0x73717368)
 
 /* Attempts to read and verify the squashfs magic to verify having a valid bundle */
 static gboolean input_stream_check_bundle_identifier(GInputStream *stream, GError **error)
@@ -795,12 +789,32 @@ gboolean check_bundle(const gchar *bundlename, RaucBundle **bundle, gboolean ver
 	}
 
 	if (verify) {
+		const gchar *load_capath = r_context()->config->keyring_path;
+		const gchar *load_cadir = r_context()->config->keyring_directory;
 		CMS_ContentInfo *cms = NULL;
 		X509_STORE *store = NULL;
 
+		if (!(store = X509_STORE_new())) {
+			g_set_error_literal(
+					error,
+					R_SIGNATURE_ERROR,
+					R_SIGNATURE_ERROR_X509_NEW,
+					"failed to allocate new X509 store");
+			goto out;
+		}
+		if (!X509_STORE_load_locations(store, load_capath, load_cadir)) {
+			g_set_error(
+					error,
+					R_SIGNATURE_ERROR,
+					R_SIGNATURE_ERROR_CA_LOAD,
+					"failed to load CA file '%s' and/or directory '%s'", load_capath, load_cadir);
+
+			goto out;
+		}
+
 		g_message("Verifying bundle... ");
 		/* the squashfs image size is in offset */
-		res = cms_verify_file(ibundle->path, ibundle->sigdata, offset, &cms, &store, &ierror);
+		res = cms_verify_file(ibundle->path, ibundle->sigdata, offset, store, &cms, &ierror);
 		if (!res) {
 			g_propagate_error(error, ierror);
 			goto out;

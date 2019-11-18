@@ -3,7 +3,7 @@ Upstream-Name: rauc
 Source: https://github.com/rauc/rauc
 
 Files: *
-Copyright: 2016-2018 Jan Luebbe, Enrico Joerns, Juergen Borleis
+Copyright: 2016-2019 Jan Luebbe, Enrico Joerns, Juergen Borleis
 License: LGPL-2.1+
 
 Files: test/sharness.sh

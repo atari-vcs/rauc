@@ -1,0 +1,54 @@
+From: Arnaud Rebillout <arnaud.rebillout@collabora.com>
+Date: Wed, 13 Nov 2019 11:25:54 +0700
+Subject: [PATCH] rauc.1, src/mbr: fix typos
+
+These typos show up when building the package for Debian, the Lintian
+tool can be picky:
+
+~~~~
+$ lintian ../rauc_1.2-1_amd64.changes
+I: rauc: spelling-error-in-binary usr/bin/rauc multipe multiple
+I: rauc: spelling-error-in-manpage usr/share/man/man1/rauc.1.gz allows to allows one to
+~~~~
+
+Actually there are many more "allows to" in RAUC codebase, which indeed
+seems to be a common mistake according to [1]. Replacing by "allows one"
+or "allows us" or something else? I'm not a native English speaker, I
+can't say, so I prefer not to touch it, except for the one that Lintian
+complains about :)
+
+[1]: https://www.impan.pl/wydawnictwa/dla-autorow/errors.pdf
+
+Signed-off-by: Arnaud Rebillout <arnaud.rebillout@collabora.com>
+Origin: upstream, https://github.com/rauc/rauc/commit/41d5f33
+---
+ rauc.1    | 2 +-
+ src/mbr.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/rauc.1 b/rauc.1
+index 3401a96c..7585ba3f 100644
+--- a/rauc.1
++++ b/rauc.1
+@@ -174,7 +174,7 @@ The subcommands \fBmark-good\fR and \fBmark-bad\fR can be used to set the state
+ explicitly. These subcommands usually operate on the currently booted slot if not specified per
+ additional parameter.
+ 
+-The subcommand \fBmark-active\fR allows to manually switch to a different slot. Here too,
++The subcommand \fBmark-active\fR allows one to manually switch to a different slot. Here too,
+ the desired slot can be given per parameter, otherwise the currently booted one is used.
+ 
+ \fBOptions:\fR
+diff --git a/src/mbr.c b/src/mbr.c
+index f74cca2d..c11372f1 100644
+--- a/src/mbr.c
++++ b/src/mbr.c
+@@ -235,7 +235,7 @@ static gboolean get_raw_partition_entry(gint fd,
+ 
+ 	if (partition->start % sector_size || partition->size % sector_size) {
+ 		g_set_error(error, R_UPDATE_ERROR, R_UPDATE_ERROR_FAILED,
+-				"Partition start address or size is not a multipe"
++				"Partition start address or size is not a multiple"
+ 				" of sector size %d", sector_size);
+ 		goto out;
+ 	}
