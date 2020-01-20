@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# escape to bash-compatible variable assignment for saving pre-values
+for i in $BAREBOX_STATE_VARS_PRE; do
+	eval $(echo $i | sed 's/\./__/g')
+done
+
+# Command line parsing
+while [[ $# > 1 ]]; do
+	key="$1"
+	case $key in
+		-s)
+			SETVAR="$SETVAR$2 "
+			shift
+			;;
+		-g)
+			GETVAR="$GETVAR$2 "
+			shift
+			;;
+		*)
+			echo "Invalid key: $key"
+			exit 1
+			;;
+	esac
+shift
+done
+
+function check_var {
+	found=0
+	for l in $BAREBOX_STATE_VARS_PRE; do
+		if [ "$1" = "${l%=*}" ]; then
+			found=1
+		fi
+	done
+	if [ "$found" -eq "0" ]; then
+		echo "Invalid variable: $1"
+		exit 1
+	fi
+}
+
+for i in $SETVAR; do
+	var="${i%=*}"
+	val="${i#*=}"
+
+	check_var "$var" "$val"
+
+	# Assign new value
+	eval $(echo $SETVAR | sed 's/\./__/g')
+done
+
+for i in $GETVAR; do
+	var="${i%=*}"
+	val="${i#*=}"
+
+	check_var "$var"
+
+	# Output values read
+	eval echo \$$(echo ${i%=*} | sed 's/\./__/g')
+done
+
+# If we do not set something, exit before post value validation
+if [ -z "$SETVAR" ]; then
+	exit 0
+fi
+
+for i in $BAREBOX_STATE_VARS_POST; do
+	comp=$(echo ${i%=*} | sed 's/\./__/g')
+	if [ "${i#*=}" != "${!comp}" ]; then
+		echo "${i%=*} should be ${i#*=} but was ${!comp}" 1>&2
+		exit 2
+	fi
+done
+
+exit 0

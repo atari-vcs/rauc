@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# run a GTest in tap mode. The test binary is passed as $1
+# CATCHSEGV is the glibc catchsegv helper (if found)
+
+$CATCHSEGV $1 -k --tap
