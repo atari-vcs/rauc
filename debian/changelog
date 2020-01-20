@@ -1,3 +1,12 @@
+rauc (1.1-2ata1) vcs; urgency=medium
+
+  * Drop build-time dependency on grub as it's not present in apertis
+    + debian/control: Drop grub-common build-depend
+    + debian/patches/apertis/0007-Disable-tests-that-depend-on-grub.patch:
+      - Added skip tests that rely on grub-editenv
+
+ -- Sjoerd Simons <sjoerd.simons@collabora.co.uk>  Mon, 20 Jan 2020 16:24:17 +0100
+
 rauc (1.1-2) unstable; urgency=medium
 
   [ Uwe Kleine-König ]
