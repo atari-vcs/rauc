@@ -1,3 +1,9 @@
+rauc (1.1-2ata2) vcs; urgency=medium
+
+  * Pass installed system version to bundle install-check hook script
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Tue, 04 Feb 2020 13:21:56 +0000
+
 rauc (1.1-2ata1) vcs; urgency=medium
 
   * Drop build-time dependency on grub as it's not present in apertis

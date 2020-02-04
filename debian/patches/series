@@ -5,3 +5,4 @@ test-install-fix-missing-pre-set-of-bootslot.patch
 disable-network-tests.patch
 install-wrapper-to-pkgdatadir.patch
 apertis/0007-Disable-tests-that-depend-on-grub.patch
+atari/pass-system-version-to-bundle-install-hooks.patch
