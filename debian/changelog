@@ -1,3 +1,10 @@
+rauc (1.1-2ata3) vcs; urgency=medium
+
+  * Cherry pick update from upstream to set casync temporary location.
+    (commit: 446214528c)
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Wed, 05 Feb 2020 15:42:29 +0000
+
 rauc (1.1-2ata2) vcs; urgency=medium
 
   * Pass installed system version to bundle install-check hook script
