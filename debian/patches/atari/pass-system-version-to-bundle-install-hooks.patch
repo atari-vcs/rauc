@@ -6,24 +6,23 @@ Pass installed system version to bundle install-check hook script.
 
 Signed-off-by: Christopher Obbard <chris.obbard@collabora.com>
 ---
- src/install.c | 14 +++++++++++++-
- 1 file changed, 13 insertions(+), 1 deletion(-)
+ src/install.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
 
 diff --git a/src/install.c b/src/install.c
-index d790218..c695b4a 100644
+index d790218..2dd6ceb 100644
 --- a/src/install.c
 +++ b/src/install.c
-@@ -687,7 +687,8 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
- 	GInputStream *instream = NULL;
+@@ -688,6 +688,8 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
  	GDataInputStream *datainstream = NULL;
  	gboolean res = FALSE;
--	gchar *outline, *hookreturnmsg = NULL;
-+	gchar *outline, *hookreturnmsg, *system_version = NULL;
+ 	gchar *outline, *hookreturnmsg = NULL;
++	g_autofree gchar *system_version = NULL;
 +	RaucSlot *s = NULL;
  
  	g_assert_nonnull(manifest->hook_name);
  
-@@ -695,10 +696,21 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
+@@ -695,10 +697,21 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
  
  	g_message("Running bundle hook %s", hook_cmd);
  
@@ -33,7 +32,7 @@ index d790218..c695b4a 100644
 +	if (s) {
 +		load_slot_status(s);
 +		if (s->status)
-+			system_version = s->status->bundle_version;
++			system_version = g_strdup(s->status->bundle_version);
 +	}
 +	g_message("bootslot=%s, system_version=%s", r_context()->bootslot, system_version ?: "");
 +
@@ -45,3 +44,4 @@ index d790218..c695b4a 100644
  
  	g_subprocess_launcher_setenv(launcher, "RAUC_MF_COMPATIBLE", manifest->update_compatible, TRUE);
  	g_subprocess_launcher_setenv(launcher, "RAUC_MF_VERSION", manifest->update_version ?: "", TRUE);
+ 

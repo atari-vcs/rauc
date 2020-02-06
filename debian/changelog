@@ -1,3 +1,9 @@
+rauc (1.1-2ata4) vcs; urgency=medium
+
+  * Fix memory-leak in patch atari/pass-system-version-to-bundle-install-hooks.patch
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Thu, 06 Feb 2020 18:09:53 +0000
+
 rauc (1.1-2ata3) vcs; urgency=medium
 
   * Cherry pick update from upstream to set casync temporary location.
