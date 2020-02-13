@@ -1,5 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 #include <gio/gunixoutputstream.h>
 #include <mtd/ubi-user.h>
 #include <string.h>
@@ -12,6 +14,7 @@
 #include "signature.h"
 #include "update_handler.h"
 #include "emmc.h"
+#include "mbr.h"
 #include "utils.h"
 
 
@@ -30,31 +33,30 @@ GQuark r_update_error_quark(void)
 static GUnixOutputStream* open_slot_device(RaucSlot *slot, int *fd, GError **error)
 {
 	GUnixOutputStream *outstream = NULL;
-	GFile *destslotfile = NULL;
 	GError *ierror = NULL;
 	int fd_out;
 
-	destslotfile = g_file_new_for_path(slot->device);
+	g_return_val_if_fail(slot, NULL);
+	g_return_val_if_fail(error == NULL || *error == NULL, NULL);
 
-	fd_out = open(g_file_get_path(destslotfile), O_WRONLY | O_EXCL);
+	fd_out = g_open(slot->device, O_WRONLY | O_EXCL);
 
 	if (fd_out == -1) {
 		g_set_error(error, R_UPDATE_ERROR, R_UPDATE_ERROR_FAILED,
-				"opening output device failed: %s", strerror(errno));
-		goto out;
+				"Opening output device %s failed: %s", slot->device, strerror(errno));
+		return NULL;
 	}
 
 	outstream = (GUnixOutputStream *) g_unix_output_stream_new(fd_out, TRUE);
 	if (outstream == NULL) {
 		g_propagate_prefixed_error(error, ierror,
-				"failed to open file for writing: ");
-		goto out;
+				"Failed to open file for writing: ");
+		return NULL;
 	}
 
 	if (fd != NULL)
 		*fd = fd_out;
 
-out:
 	return outstream;
 }
 
@@ -62,16 +64,14 @@ out:
 static gboolean clear_slot(RaucSlot *slot, GError **error)
 {
 	GError *ierror = NULL;
-	gboolean res = FALSE;
 	static gchar zerobuf[CLEAR_BLOCK_SIZE] = {};
 	g_autoptr(GOutputStream) outstream = NULL;
-	int out_fd;
 	gint write_count = 0;
 
-	outstream = (GOutputStream *) open_slot_device(slot, &out_fd, &ierror);
+	outstream = (GOutputStream *) open_slot_device(slot, NULL, &ierror);
 	if (outstream == NULL) {
 		g_propagate_error(error, ierror);
-		goto out;
+		return FALSE;
 	}
 
 	while (write_count != -1) {
@@ -85,20 +85,16 @@ static gboolean clear_slot(RaucSlot *slot, GError **error)
 		    !g_error_matches(ierror, G_IO_ERROR, G_IO_ERROR_NO_SPACE)) {
 			g_propagate_prefixed_error(error, ierror,
 					"failed clearing block device: ");
-			goto out;
+			return FALSE;
 		}
 	}
 
-	res = g_output_stream_close(outstream, NULL, &ierror);
-	if (!res) {
+	if (!g_output_stream_close(outstream, NULL, &ierror)) {
 		g_propagate_error(error, ierror);
-		goto out;
+		return FALSE;
 	}
 
-	res = TRUE;
-
-out:
-	return res;
+	return TRUE;
 }
 #endif
 
@@ -164,8 +160,9 @@ static gboolean copy_raw_image(RaucImage *image, GUnixOutputStream *outstream, G
 	return TRUE;
 }
 
-static gboolean casync_extract(RaucImage *image, gchar *dest, const gchar *seed, const gchar *store, GError **error)
+static gboolean casync_extract(RaucImage *image, gchar *dest, const gchar *seed, const gchar *store, const gchar *tmpdir, GError **error)
 {
+	g_autoptr(GSubprocessLauncher) launcher = NULL;
 	g_autoptr(GSubprocess) sproc = NULL;
 	GError *ierror = NULL;
 	gboolean res = FALSE;
@@ -186,9 +183,11 @@ static gboolean casync_extract(RaucImage *image, gchar *dest, const gchar *seed,
 	g_ptr_array_add(args, g_strdup(dest));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE);
+	if (tmpdir)
+		g_subprocess_launcher_setenv(launcher, "TMPDIR", tmpdir, TRUE);
+
+	sproc = r_subprocess_launcher_spawnv(launcher, args, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -237,6 +236,7 @@ static gboolean casync_extract_image(RaucImage *image, gchar *dest, GError **err
 	RaucSlot *seedslot = NULL;
 	g_autofree gchar *seed = NULL;
 	gchar *store = NULL;
+	gchar *tmpdir = NULL;
 	gboolean seed_mounted = FALSE;
 
 	/* Prepare Seed */
@@ -274,8 +274,13 @@ extract:
 	store = r_context()->install_info->mounted_bundle->storepath;
 	g_debug("Using store path: '%s'", store);
 
+	/* Set temporary directory */
+	tmpdir = r_context()->config->tmp_path;
+	if (tmpdir)
+		g_debug("Using tmp path: '%s'", tmpdir);
+
 	/* Call casync to extract */
-	res = casync_extract(image, dest, seed, store, &ierror);
+	res = casync_extract(image, dest, seed, store, tmpdir, &ierror);
 	if (!res) {
 		g_propagate_error(error, ierror);
 		goto out;
@@ -362,9 +367,7 @@ static gboolean ubifs_format_slot(RaucSlot *dest_slot, GError **error)
 	g_ptr_array_add(args, g_strdup(dest_slot->device));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -397,9 +400,7 @@ static gboolean ext4_resize_slot(RaucSlot *dest_slot, GError **error)
 	g_ptr_array_add(args, g_strdup(dest_slot->device));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -437,9 +438,7 @@ static gboolean ext4_format_slot(RaucSlot *dest_slot, GError **error)
 	g_ptr_array_add(args, g_strdup(dest_slot->device));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -476,9 +475,7 @@ static gboolean vfat_format_slot(RaucSlot *dest_slot, GError **error)
 	g_ptr_array_add(args, g_strdup(dest_slot->device));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -514,9 +511,7 @@ static gboolean nand_format_slot(const gchar *device, GError **error)
 	g_ptr_array_add(args, g_strdup("0"));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -552,9 +547,7 @@ static gboolean nand_write_slot(const gchar *image, const gchar *device, GError 
 	g_ptr_array_add(args, g_strdup(image));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -591,9 +584,7 @@ static gboolean untar_image(RaucImage *image, gchar *dest, GError **error)
 	g_ptr_array_add(args, g_strdup("--numeric-owner"));
 	g_ptr_array_add(args, NULL);
 
-	r_debug_subprocess(args);
-	sproc = g_subprocess_newv((const gchar * const *)args->pdata,
-			G_SUBPROCESS_FLAGS_NONE, &ierror);
+	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_NONE, &ierror);
 	if (sproc == NULL) {
 		g_propagate_prefixed_error(
 				error,
@@ -655,7 +646,7 @@ static gboolean run_slot_hook(const gchar *hook_name, const gchar *hook_cmd, Rau
 	g_subprocess_launcher_setenv(launcher, "RAUC_SYSTEM_VARIANT", r_context()->config->system_variant ?: "", TRUE);
 
 	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_NAME", slot->name, TRUE);
-	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_STATE", slotstate_to_str(slot->state), TRUE);
+	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_STATE", r_slot_slotstate_to_str(slot->state), TRUE);
 	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_CLASS", slot->sclass, TRUE);
 	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_TYPE", slot->type, TRUE);
 	g_subprocess_launcher_setenv(launcher, "RAUC_SLOT_DEVICE", slot->device, TRUE);
@@ -1141,6 +1132,120 @@ out:
 	return res;
 }
 
+static gboolean img_to_boot_mbr_switch_handler(RaucImage *image, RaucSlot *dest_slot, const gchar *hook_name, GError **error)
+{
+	gboolean res = FALSE;
+	int out_fd = -1, inactive_part;
+	g_autoptr(GUnixOutputStream) outstream = NULL;
+	GError *ierror = NULL;
+	struct mbr_switch_partition dest_partition;
+
+	/* run slot pre install hook if enabled */
+	if (hook_name && image->hooks.pre_install) {
+		res = run_slot_hook(hook_name, R_SLOT_HOOK_PRE_INSTALL, NULL,
+				dest_slot, &ierror);
+		if (!res) {
+			g_propagate_error(error, ierror);
+			goto out;
+		}
+	}
+
+	res = r_mbr_switch_get_inactive_partition(dest_slot->device,
+			&dest_partition, dest_slot->region_start,
+			dest_slot->region_size, &ierror);
+	if (!res) {
+		g_propagate_error(error, ierror);
+		goto out;
+	}
+
+	if (dest_partition.start == dest_slot->region_start)
+		inactive_part = 0;
+	else
+		inactive_part = 1;
+
+	g_message("Found inactive boot partition %d (pos. %"G_GUINT64_FORMAT "B, size %"G_GUINT64_FORMAT "B)",
+			inactive_part, dest_partition.start, dest_partition.size);
+
+	if (dest_partition.size < image->checksum.size) {
+		g_set_error(error, R_UPDATE_ERROR, R_UPDATE_ERROR_FAILED,
+				"Size of image (%"G_GSIZE_FORMAT ") does not fit to slot size %"G_GUINT64_FORMAT,
+				image->checksum.size, dest_partition.size);
+		res = FALSE;
+		goto out;
+	}
+
+	g_message("Clearing inactive boot partition %d on %s", inactive_part,
+			dest_slot->device);
+
+	res = r_mbr_switch_clear_partition(dest_slot->device, &dest_partition, &ierror);
+	if (!res) {
+		g_propagate_prefixed_error(error, ierror,
+				"Failed to clear inactive partition: ");
+		goto out;
+	}
+
+	g_message("Opening inactive boot partition %d on %s", inactive_part,
+			dest_slot->device);
+
+	out_fd = open(dest_slot->device, O_WRONLY);
+	if (out_fd == -1) {
+		g_set_error(error, R_UPDATE_ERROR, R_UPDATE_ERROR_FAILED,
+				"Opening output device failed: %s",
+				strerror(errno));
+		res = FALSE;
+		goto out;
+	}
+
+	if (lseek(out_fd, dest_partition.start, SEEK_SET) !=
+	    (off_t)dest_partition.start) {
+		g_set_error(error, R_UPDATE_ERROR, R_UPDATE_ERROR_FAILED,
+				"Failed to set file to position %"G_GUINT64_FORMAT,
+				dest_partition.start);
+		res = FALSE;
+		goto out;
+	}
+
+	outstream = (GUnixOutputStream *)g_unix_output_stream_new(out_fd, FALSE);
+	if (outstream == NULL) {
+		g_propagate_prefixed_error(error, ierror,
+				"Failed to open file for writing: ");
+		res = FALSE;
+		goto out;
+	}
+
+	g_message("Copying image to inactive boot partition %d on %s",
+			inactive_part, dest_slot->device);
+
+	res = copy_raw_image(image, outstream, &ierror);
+	if (!res) {
+		g_propagate_error(error, ierror);
+		goto out;
+	}
+
+	g_message("Setting MBR to switch boot partitions");
+
+	res = r_mbr_switch_set_boot_partition(dest_slot->device, &dest_partition, &ierror);
+	if (!res) {
+		g_propagate_error(error, ierror);
+		goto out;
+	}
+
+	/* run slot post install hook if enabled */
+	if (hook_name && image->hooks.post_install) {
+		res = run_slot_hook(hook_name, R_SLOT_HOOK_POST_INSTALL, NULL,
+				dest_slot, &ierror);
+		if (!res) {
+			g_propagate_error(error, ierror);
+			goto out;
+		}
+	}
+out:
+	if (out_fd >= 0)
+		close(out_fd);
+
+	return res;
+}
+
 #if ENABLE_EMMC_BOOT_SUPPORT == 1
 static gboolean img_to_boot_emmc_handler(RaucImage *image, RaucSlot *dest_slot, const gchar *hook_name, GError **error)
 {
@@ -1390,6 +1495,7 @@ RaucUpdatePair updatepairs[] = {
 #if ENABLE_EMMC_BOOT_SUPPORT == 1
 	{"*.img", "boot-emmc", img_to_boot_emmc_handler},
 #endif
+	{"*.vfat", "boot-mbr-switch", img_to_boot_mbr_switch_handler},
 	{"*.img", "*", img_to_raw_handler}, /* fallback */
 	{0}
 };

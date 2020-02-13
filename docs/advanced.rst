@@ -379,6 +379,35 @@ are listed below:
 | Fallback  | tricky (reconvert data?) | easy (old data!)          |
 +-----------+--------------------------+---------------------------+
 
+Managing a ``/dev/data`` Symbolic Link
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For redundant data partitions the active rootfs slot has to mount the correct
+data partition dynamically.
+For example with ubifs, a udev ruleset can be used for this::
+
+  KERNEL=="ubi[0-9]_[0-9]", PROGRAM="/usr/bin/is-parent-active %k", RESULT=="1", SYMLINK+="data"
+
+This example first determines if ubiX_Y is a data slot with an active parent
+rootfs slot by calling the script below.
+Then, the current ubiX_Y partition is bound to /dev/data if the secript
+retured ``1`` as its output.
+
+``/usr/bin/is-parent-active`` is a simple bash script::
+
+  #!/bin/bash
+
+  ROOTFS_DEV=<determine rootfs by using proc cmdline or mount>
+  TEST_DEV=<obtain parent rootfs device for currently processed device (%k)>
+
+  if [[ $ROOTFS_DEV == $TEST_DEV ]]; then
+  	echo 1
+  else
+  	echo 0
+  fi
+
+With this you can always mount ``/dev/data`` and get the correct data slot.
+
 .. _casync-support:
 
 RAUC casync Support
@@ -641,6 +670,63 @@ A ``system.conf`` could look like this:
   partition register.
   Be sure your kernel is >= 4.16-rc7 (resp. >= 4.15.14, >= 4.14.31) or contains
   this patch: https://www.spinics.net/lists/linux-mmc/msg48271.html
+
+.. _sec-mbr-partition:
+
+Update Boot Partitions in MBR
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some SOCs (like Xilinx ZynqMP) contain a fixed ROM code, which boots from the first
+partition in the MBR partition table of a storage medium.
+In order to atomically update the bootloader of such systems, RAUC supports changing
+the MBR partition table and thus switching between two partitions of the same size -
+one active boot partition (i.e. the partition is defined in the MBR partition table)
+and one inactive partition (i.e. there is no entry for it in the MBR partition
+table) which is used to update the bootloader.
+
+A memory region, where the two partitions are stored has to be defined in the
+configuration (see below) and initially a boot partition has to exist at either
+the start of the region or start + size / 2.
+
+Consider the following example layout of a storage medium with a boot partition size
+of 33 Mbytes:
+
++--------------+----------------+-----------------------------------------------+
+| Start        | Size           |                                               |
++==============+================+===============================================+
+| 0x00000000   |  512 bytes     | MBR                                           |
++--------------+----------------+-----------------------------------------------+
+| 0x00000200   |  160 Kbytes    | Space for state, barebox-environment, ...     |
++--------------+----------------+-----------------------------------------------+
+| | 0x00028200 | | 66 Mbytes    | | MBR switch region containing:               |
+| | 0x00028200 | | 33 Mbytes    | | - active boot partition (entry in MBR)      |
+| | 0x02128200 | | 33 Mbytes    | | - inactive boot partition (no entry in MBR) |
++--------------+----------------+-----------------------------------------------+
+| 0x04228200   | Remaining size | other partitions                              |
+|              |                | (partition table entries 2, 3, 4)             |
++--------------+----------------+-----------------------------------------------+
+
+RAUC uses the start address and size defined in the first entry in the MBR partition
+table, to distinguish between active and inactive boot partition and updates the
+hidden, inactive partition.
+After the update the bootloader is switched by changing the first partition entry
+and writing the whole 512 bytes MBR atomically.
+
+The required slot type is ``boot-mbr-switch``.
+The device to be specified is expected to be the root device.
+The boot partitions are derived by the definition of the values ``region-start``
+and ``region-size``. Both values have to be set in integer decimal bytes and can be
+postfixed with K/M/G/T.
+
+A ``system.conf`` could look like this:
+
+.. code-block:: cfg
+
+  [slot.bootloader.0]
+  device=/dev/mmcblk1
+  type=boot-mbr-switch
+  region-start=164352
+  region-size=66M
 
 Bootloader Update Ideas
 ~~~~~~~~~~~~~~~~~~~~~~~
