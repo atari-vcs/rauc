@@ -56,6 +56,7 @@ Features
   * UBIFS
   * raw NAND (using nandwrite)
   * squashfs
+  * MBR partition table
 * Independent from updates source
 
   * **USB Stick**
@@ -95,11 +96,11 @@ Target Requirements
   * EFI: EFI variables
 * Boot target selection support in the bootloader
 * Enough mass storage for two symmetric/asymmetric/custom slots
-* For bundle mode:
+* For normal bundle mode:
 
   * Enough storage for the compressed bundle file (in memory, in a temporary
     partition or on an external storage device)
-* For network mode:
+* For casync bundle mode:
 
   * No additional storage needed
   * Network interface
@@ -120,13 +121,14 @@ Host (Build) Prerequisites
 
 -  automake
 -  libtool
+-  libdbus-1-dev
 -  libglib2.0-dev
 -  libcurl3-dev
 -  libssl-dev
 
 ::
 
-   sudo apt-get install automake libtool libglib2.0-dev libcurl3-dev libssl-dev
+   sudo apt-get install automake libtool libdbus-1-dev libglib2.0-dev libcurl3-dev libssl-dev
 
 If you intend to use json-support you also need
 
@@ -158,7 +160,7 @@ Building from Sources
 ---------------------
 
 .. note:: RAUC is intended to be built both as a host tool as well as a target
-   tool (service). Therfore it is fully prepared for `automake cross-compilation
+   tool (service). Therefore it is fully prepared for `automake cross-compilation
    <https://www.gnu.org/software/automake/manual/html_node/Cross_002dCompilation.html>`_
 
 ::
@@ -173,7 +175,7 @@ Manual Installation
 -------------------
 
 .. note:: To prepare RAUC for the target device, it is highly recommended to
-  use an embedded Linux distrubition build suite such as Yocto/OE, PTXdist or
+  use an embedded Linux distribution build suite such as Yocto/OE, PTXdist or
   Buildroot.
 
 On the host system RAUC can be used directly from the build dir, or optionally
@@ -188,7 +190,9 @@ Running the Test Suite
 
 ::
 
-    sudo apt-get install user-mode-linux slirp
+    sudo apt-get install user-mode-linux slirp squashfs-tools
+    # Optional to run all tests:
+    # sudo apt-get install faketime casync grub-common softhsm2 opensc opensc-pkcs11 libengine-pkcs11-openssl
     make check
     ./uml-test
 
@@ -241,8 +245,8 @@ section for more details.
 
 .. |LGPLv2.1| image:: https://img.shields.io/badge/license-LGPLv2.1-blue.svg
    :target: https://raw.githubusercontent.com/rauc/rauc/master/COPYING
-.. |Travis_branch| image:: https://img.shields.io/travis/rauc/rauc/master.svg
-   :target: https://travis-ci.org/rauc/rauc
+.. |Travis_branch| image:: https://img.shields.io/travis/com/rauc/rauc/master.svg
+   :target: https://travis-ci.com/rauc/rauc
 .. |Codecov_branch| image:: https://codecov.io/gh/rauc/rauc/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/rauc/rauc
 .. |Coverity| image:: https://img.shields.io/coverity/scan/5085.svg

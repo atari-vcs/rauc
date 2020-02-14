@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <gio/gio.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -6,6 +7,8 @@
 #include <json-glib/json-gobject.h>
 #endif
 #include <stdio.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "bundle.h"
 #include "bootchooser.h"
@@ -22,10 +25,39 @@
 GMainLoop *r_loop = NULL;
 int r_exit_status = 0;
 
-gboolean install_ignore_compatible = FALSE;
+gboolean install_ignore_compatible, install_progressbar = FALSE;
 gboolean info_noverify, info_dumpcert = FALSE;
 gboolean status_detailed = FALSE;
 gchar *output_format = NULL;
+gchar *signing_keyring = NULL;
+
+static gchar* make_progress_line(gint percentage)
+{
+	struct winsize w;
+	GString *printbuf = NULL;
+	gint pbar_len = 0;
+
+	g_return_val_if_fail(percentage <= 100, NULL);
+
+	/* obtain terminal window parameters */
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1) {
+		g_warning("Unable to obtain window parameters: %s", strerror(errno));
+		/* default to 80 */
+		w.ws_col = 80;
+	}
+	pbar_len = w.ws_col - 1 - 1 - 5;
+
+	printbuf = g_string_sized_new(w.ws_col);
+
+	g_string_append_c(printbuf, '[');
+	for (int i = 0; i < pbar_len; i++) {
+		g_string_append_c(printbuf, i > pbar_len * percentage / 100 ? ' ' : '#');
+	}
+	g_string_append_c(printbuf, ']');
+	g_string_append_printf(printbuf, "%3d%%", percentage);
+
+	return g_string_free(printbuf, FALSE);
+}
 
 static gboolean install_notify(gpointer data)
 {
@@ -34,7 +66,7 @@ static gboolean install_notify(gpointer data)
 	g_mutex_lock(&args->status_mutex);
 	while (!g_queue_is_empty(&args->status_messages)) {
 		gchar *msg = g_queue_pop_head(&args->status_messages);
-		g_message("installing %s: %s", args->name, msg);
+		g_print("%s", msg);
 		g_free(msg);
 	}
 	r_exit_status = args->status_result;
@@ -69,11 +101,22 @@ static void on_installer_changed(GDBusProxy *proxy, GVariant *changed,
 
 	g_mutex_lock(&args->status_mutex);
 	if (g_variant_lookup(changed, "Operation", "&s", &message)) {
-		g_queue_push_tail(&args->status_messages, g_strdup(message));
+		g_queue_push_tail(&args->status_messages, g_strdup_printf("%s\n", message));
 	} else if (g_variant_lookup(changed, "Progress", "(i&si)", &percentage, &message, &depth)) {
-		g_queue_push_tail(&args->status_messages, g_strdup_printf("%3"G_GINT32_FORMAT "%% %s", percentage, message));
+		if (install_progressbar && isatty(STDOUT_FILENO)) {
+			g_autofree gchar *progress = make_progress_line(percentage);
+			/* This does:
+			 * - move to start of line
+			 * - clear line
+			 * - print 2 lines
+			 * - move to previous line
+			 */
+			g_queue_push_tail(&args->status_messages, g_strdup_printf("\r\033[J%3"G_GINT32_FORMAT "%% %s\n%s\033[F", percentage, message, progress));
+		} else {
+			g_queue_push_tail(&args->status_messages, g_strdup_printf("%3"G_GINT32_FORMAT "%% %s\n", percentage, message));
+		}
 	} else if (g_variant_lookup(changed, "LastError", "&s", &message) && message[0] != '\0') {
-		g_queue_push_tail(&args->status_messages, g_strdup_printf("LastError: %s", message));
+		g_queue_push_tail(&args->status_messages, g_strdup_printf("%sLastError: %s\n", isatty(STDOUT_FILENO) ? "\033[J" : "", message));
 	}
 	g_mutex_unlock(&args->status_mutex);
 
@@ -244,6 +287,7 @@ static gboolean bundle_start(int argc, char **argv)
 	GError *ierror = NULL;
 	g_autofree gchar *inpath = NULL;
 	g_autofree gchar *outpath = NULL;
+	g_autofree gchar *outdir = NULL;
 	g_debug("bundle start");
 
 	if (argc < 3) {
@@ -274,7 +318,19 @@ static gboolean bundle_start(int argc, char **argv)
 	inpath = resolve_path(NULL, argv[2]);
 	outpath = resolve_path(NULL, argv[3]);
 
-	if (g_str_has_prefix(outpath, inpath)) {
+	if (!g_file_test(inpath, G_FILE_TEST_IS_DIR)) {
+		g_printerr("Input path must point to a directory!\n");
+		r_exit_status = 1;
+		goto out;
+	}
+
+	/* strip trailing slash for comparison */
+	if (g_str_has_suffix(inpath, "/")) {
+		inpath[strlen(inpath)-1] = '\0';
+	}
+
+	outdir = g_path_get_dirname(outpath);
+	if (g_str_has_prefix(outdir, inpath)) {
 		g_printerr("Bundle path must be located outside input directory!\n");
 		r_exit_status = 1;
 		goto out;
@@ -952,75 +1008,96 @@ static void free_status_print(RaucStatusPrint *status)
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(RaucStatusPrint, free_status_print);
 
+static void r_string_append_slot(GString *text, RaucSlot *slot, RaucStatusPrint *status)
+{
+	RaucSlotStatus *slot_state = slot->status;
+
+	g_string_append_printf(text, "\n  %s: class=%s, device=%s, type=%s, bootname=%s\n",
+			slot->name, slot->sclass, slot->device, slot->type, slot->bootname);
+	g_string_append_printf(text, "      state=%s, description=%s", r_slot_slotstate_to_str(slot->state), slot->description);
+	if (slot->parent)
+		g_string_append_printf(text, ", parent=%s", slot->parent->name);
+	else
+		g_string_append(text, ", parent=(none)");
+	if (slot->mount_point || slot->ext_mount_point)
+		g_string_append_printf(text, ", mountpoint=%s", slot->mount_point ? slot->mount_point : slot->ext_mount_point);
+	else
+		g_string_append(text, ", mountpoint=(none)");
+	if (slot->bootname)
+		g_string_append_printf(text, "\n      boot status=%s", slot->boot_good ? "good" : "bad");
+	if (status_detailed && slot_state) {
+		g_string_append_printf(text, "\n      slot status:");
+		g_string_append_printf(text, "\n          bundle:");
+		g_string_append_printf(text, "\n              compatible=%s", slot_state->bundle_compatible);
+		if (slot_state->bundle_version)
+			g_string_append_printf(text, "\n              version=%s", slot_state->bundle_version);
+		if (slot_state->bundle_description)
+			g_string_append_printf(text, "\n              description=%s", slot_state->bundle_description);
+		if (slot_state->bundle_build)
+			g_string_append_printf(text, "\n              build=%s", slot_state->bundle_build);
+		if (slot_state->checksum.digest && slot_state->checksum.type == G_CHECKSUM_SHA256) {
+			g_string_append_printf(text, "\n          checksum:");
+			g_string_append_printf(text, "\n              sha256=%s", slot_state->checksum.digest);
+			g_string_append_printf(text, "\n              size=%"G_GSIZE_FORMAT, slot_state->checksum.size);
+		}
+		if (slot_state->installed_timestamp) {
+			g_string_append_printf(text, "\n          installed:");
+			g_string_append_printf(text, "\n              timestamp=%s", slot_state->installed_timestamp);
+			g_string_append_printf(text, "\n              count=%u", slot_state->installed_count);
+		}
+		if (slot_state->activated_timestamp) {
+			g_string_append_printf(text, "\n          activated:");
+			g_string_append_printf(text, "\n              timestamp=%s", slot_state->activated_timestamp);
+			g_string_append_printf(text, "\n              count=%u", slot_state->activated_count);
+		}
+		if (slot_state->status)
+			g_string_append_printf(text, "\n          status=%s", slot_state->status);
+	}
+}
+
 static gchar* r_status_formatter_readable(RaucStatusPrint *status)
 {
-	GHashTableIter iter;
-	gint slotcnt = 0;
 	GString *text = g_string_new(NULL);
-	RaucSlot *slot = NULL;
 	RaucSlot *bootedfrom = NULL;
-	gchar *name;
+	gchar **slotclasses = NULL;
 
 	g_return_val_if_fail(status, NULL);
 
-	bootedfrom = find_slot_by_device(status->slots, status->bootslot);
+	bootedfrom = r_slot_find_by_device(status->slots, status->bootslot);
 	if (!bootedfrom)
-		bootedfrom = find_slot_by_bootname(status->slots, status->bootslot);
+		bootedfrom = r_slot_find_by_bootname(status->slots, status->bootslot);
 
 	g_string_append_printf(text, "Compatible:  %s\n", status->compatible);
 	g_string_append_printf(text, "Variant:     %s\n", status->variant);
 	g_string_append_printf(text, "Booted from: %s (%s)\n", bootedfrom ? bootedfrom->name : NULL, status->bootslot);
 	g_string_append_printf(text, "Activated:   %s (%s)\n", status->primary ? status->primary->name : NULL, status->primary ? status->primary->bootname : NULL);
 
-	g_string_append(text, "slot states:\n");
-	g_hash_table_iter_init(&iter, status->slots);
-	while (g_hash_table_iter_next(&iter, (gpointer*) &name, (gpointer*) &slot)) {
-		RaucSlotStatus *slot_state = slot->status;
+	g_string_append(text, "slot states:");
 
-		slotcnt++;
+	slotclasses = r_slot_get_root_classes(status->slots);
 
-		g_string_append_printf(text, "  %s: class=%s, device=%s, type=%s, bootname=%s\n",
-				name, slot->sclass, slot->device, slot->type, slot->bootname);
-		g_string_append_printf(text, "      state=%s, description=%s", slotstate_to_str(slot->state), slot->description);
-		if (slot->parent)
-			g_string_append_printf(text, ", parent=%s", slot->parent->name);
-		else
-			g_string_append(text, ", parent=(none)");
-		if (slot->mount_point || slot->ext_mount_point)
-			g_string_append_printf(text, ", mountpoint=%s", slot->mount_point ? slot->mount_point : slot->ext_mount_point);
-		else
-			g_string_append(text, ", mountpoint=(none)");
-		if (slot->bootname)
-			g_string_append_printf(text, "\n      boot status=%s", slot->boot_good ? "good" : "bad");
-		if (status_detailed && slot_state) {
-			g_string_append_printf(text, "\n      slot status:");
-			g_string_append_printf(text, "\n          bundle:");
-			g_string_append_printf(text, "\n              compatible=%s", slot_state->bundle_compatible);
-			if (slot_state->bundle_version)
-				g_string_append_printf(text, "\n              version=%s", slot_state->bundle_version);
-			if (slot_state->bundle_description)
-				g_string_append_printf(text, "\n              description=%s", slot_state->bundle_description);
-			if (slot_state->bundle_build)
-				g_string_append_printf(text, "\n              build=%s", slot_state->bundle_build);
-			if (slot_state->checksum.digest && slot_state->checksum.type == G_CHECKSUM_SHA256) {
-				g_string_append_printf(text, "\n          checksum:");
-				g_string_append_printf(text, "\n              sha256=%s", slot_state->checksum.digest);
-				g_string_append_printf(text, "\n              size=%"G_GSIZE_FORMAT, slot_state->checksum.size);
+	for (gchar **cls = slotclasses; *cls != NULL; cls++) {
+		GList *slots = NULL;
+
+		slots = r_slot_get_all_of_class(status->slots, *cls);
+
+		for (GList *l = slots; l != NULL; l = l->next) {
+			RaucSlot *xslot = l->data;
+
+			GList *children = NULL;
+
+			r_string_append_slot(text, xslot, status);
+
+			children = r_slot_get_all_children(status->slots, xslot);
+			for (GList *cl = children; cl != NULL; cl = cl->next) {
+				RaucSlot *child_slot = cl->data;
+
+				r_string_append_slot(text, child_slot, status);
 			}
-			if (slot_state->installed_timestamp) {
-				g_string_append_printf(text, "\n          installed:");
-				g_string_append_printf(text, "\n              timestamp=%s", slot_state->installed_timestamp);
-				g_string_append_printf(text, "\n              count=%u", slot_state->installed_count);
-			}
-			if (slot_state->activated_timestamp) {
-				g_string_append_printf(text, "\n          activated:");
-				g_string_append_printf(text, "\n              timestamp=%s", slot_state->activated_timestamp);
-				g_string_append_printf(text, "\n              count=%u", slot_state->activated_count);
-			}
-			if (slot_state->status)
-				g_string_append_printf(text, "\n          status=%s", slot_state->status);
+
+			g_string_append(text, "\n");
 		}
-		g_string_append_c(text, '\n');
+
 	}
 
 	return g_string_free(text, FALSE);
@@ -1070,7 +1147,7 @@ static gchar* r_status_formatter_shell(RaucStatusPrint *status)
 
 		slotcnt++;
 
-		formatter_shell_append_n(text, "RAUC_SLOT_STATE", slotcnt, slotstate_to_str(slot->state));
+		formatter_shell_append_n(text, "RAUC_SLOT_STATE", slotcnt, r_slot_slotstate_to_str(slot->state));
 		formatter_shell_append_n(text, "RAUC_SLOT_CLASS", slotcnt, slot->sclass);
 		formatter_shell_append_n(text, "RAUC_SLOT_DEVICE", slotcnt, slot->device);
 		formatter_shell_append_n(text, "RAUC_SLOT_TYPE", slotcnt, slot->type);
@@ -1151,7 +1228,7 @@ static gchar* r_status_formatter_json(RaucStatusPrint *status, gboolean pretty)
 		json_builder_set_member_name(builder, "bootname");
 		json_builder_add_string_value(builder, slot->bootname);
 		json_builder_set_member_name(builder, "state");
-		json_builder_add_string_value(builder, slotstate_to_str(slot->state));
+		json_builder_add_string_value(builder, r_slot_slotstate_to_str(slot->state));
 		json_builder_set_member_name(builder, "parent");
 		json_builder_add_string_value(builder, slot->parent ? slot->parent->name : NULL);
 		json_builder_set_member_name(builder, "mountpoint");
@@ -1283,7 +1360,7 @@ static gboolean retrieve_slot_states_via_dbus(GHashTable **slots, GError **error
 	g_return_val_if_fail(slots != NULL && *slots == NULL, FALSE);
 	g_return_val_if_fail(error == NULL || *error == NULL, FALSE);
 
-	*slots = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free_slot);
+	*slots = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_slot_free);
 
 	proxy = r_installer_proxy_new_for_bus_sync(bus_type,
 			G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES,
@@ -1331,7 +1408,7 @@ static gboolean retrieve_slot_states_via_dbus(GHashTable **slots, GError **error
 		g_variant_dict_lookup(&dict, "type", "s", &slot->type);
 		g_variant_dict_lookup(&dict, "bootname", "s", &slot->bootname);
 		g_variant_dict_lookup(&dict, "state", "s", &state);
-		slot->state = str_to_slotstate(state);
+		slot->state = r_slot_str_to_slotstate(state);
 		g_variant_dict_lookup(&dict, "description", "s", &slot->description);
 		g_variant_dict_lookup(&dict, "parent", "s", &parent);
 		if (parent) {
@@ -1363,7 +1440,7 @@ static gboolean retrieve_slot_states_via_dbus(GHashTable **slots, GError **error
 		if (iterslot->parent) {
 			parent_slot = g_hash_table_lookup(*slots, iterslot->parent->name);
 			g_assert_nonnull(parent_slot); /* A valid serialization should not run into this case! */
-			g_clear_pointer(&iterslot->parent, r_free_slot);
+			g_clear_pointer(&iterslot->parent, r_slot_free);
 			iterslot->parent = parent_slot;
 		}
 	}
@@ -1626,6 +1703,22 @@ typedef struct {
 
 GOptionEntry entries_install[] = {
 	{"ignore-compatible", '\0', 0, G_OPTION_ARG_NONE, &install_ignore_compatible, "disable compatible check", NULL},
+	{"progress", '\0', 0, G_OPTION_ARG_NONE, &install_progressbar, "show progress bar", NULL},
+	{0}
+};
+
+GOptionEntry entries_bundle[] = {
+	{"signing-keyring", '\0', 0, G_OPTION_ARG_FILENAME, &signing_keyring, "verification keyring file", "PEMFILE"},
+	{0}
+};
+
+GOptionEntry entries_resign[] = {
+	{"signing-keyring", '\0', 0, G_OPTION_ARG_FILENAME, &signing_keyring, "verification keyring file", "PEMFILE"},
+	{0}
+};
+
+GOptionEntry entries_convert[] = {
+	{"signing-keyring", '\0', 0, G_OPTION_ARG_FILENAME, &signing_keyring, "verification keyring file", "PEMFILE"},
 	{0}
 };
 
@@ -1664,6 +1757,9 @@ static void cmdline_handler(int argc, char **argv)
 		{0}
 	};
 	GOptionGroup *install_group = g_option_group_new("install", "Install options:", "help dummy", NULL, NULL);
+	GOptionGroup *bundle_group = g_option_group_new("bundle", "Bundle options:", "help dummy", NULL, NULL);
+	GOptionGroup *resign_group = g_option_group_new("resign", "Resign options:", "help dummy", NULL, NULL);
+	GOptionGroup *convert_group = g_option_group_new("convert", "Convert options:", "help dummy", NULL, NULL);
 	GOptionGroup *info_group = g_option_group_new("info", "Info options:", "help dummy", NULL, NULL);
 	GOptionGroup *status_group = g_option_group_new("status", "Status options:", "help dummy", NULL, NULL);
 
@@ -1673,10 +1769,10 @@ static void cmdline_handler(int argc, char **argv)
 	RaucCommand rcommands[] = {
 		{UNKNOWN, "help", "<COMMAND>", "Print help", unknown_start, NULL, TRUE},
 		{INSTALL, "install", "install <BUNDLE>", "Install a bundle", install_start, install_group, FALSE},
-		{BUNDLE, "bundle", "bundle <INPUTDIR> <BUNDLENAME>", "Create a bundle from a content directory", bundle_start, NULL, FALSE},
-		{RESIGN, "resign", "resign <BUNDLENAME>", "Resign an already signed bundle", resign_start, NULL, FALSE},
+		{BUNDLE, "bundle", "bundle <INPUTDIR> <BUNDLENAME>", "Create a bundle from a content directory", bundle_start, bundle_group, FALSE},
+		{RESIGN, "resign", "resign <BUNDLENAME>", "Resign an already signed bundle", resign_start, resign_group, FALSE},
 		{EXTRACT, "extract", "extract <BUNDLENAME> <OUTPUTDIR>", "Extract the bundle content", extract_start, NULL, FALSE},
-		{CONVERT, "convert", "convert <INBUNDLE> <OUTBUNDLE>", "Convert to casync index bundle and store", convert_start, NULL, FALSE},
+		{CONVERT, "convert", "convert <INBUNDLE> <OUTBUNDLE>", "Convert to casync index bundle and store", convert_start, convert_group, FALSE},
 		{CHECKSUM, "checksum", "checksum <DIRECTORY>", "Deprecated", checksum_start, NULL, FALSE},
 		{INFO, "info", "info <FILE>", "Print bundle info", info_start, info_group, FALSE},
 		{STATUS, "status", "status", "Show system status", status_start, status_group, TRUE},
@@ -1690,6 +1786,9 @@ static void cmdline_handler(int argc, char **argv)
 	RaucCommand *rcommand = NULL;
 
 	g_option_group_add_entries(install_group, entries_install);
+	g_option_group_add_entries(bundle_group, entries_bundle);
+	g_option_group_add_entries(resign_group, entries_resign);
+	g_option_group_add_entries(convert_group, entries_convert);
 	g_option_group_add_entries(info_group, entries_info);
 	g_option_group_add_entries(status_group, entries_status);
 
@@ -1698,19 +1797,22 @@ static void cmdline_handler(int argc, char **argv)
 	g_option_context_set_ignore_unknown_options(context, TRUE);
 	g_option_context_add_main_entries(context, entries, NULL);
 	g_option_context_set_description(context,
-			"List of rauc commands:\n" \
-			"  bundle\tCreate a bundle\n" \
-			"  resign\tResign an already signed bundle\n" \
-			"  extract\tExtract the bundle content\n" \
-			"  convert\tConvert classic to casync bundle\n" \
-			"  checksum\tUpdate a manifest with checksums (and optionally sign it)\n" \
-			"  install\tInstall a bundle\n" \
-			"  info\t\tShow file information\n" \
-			"  status\tShow status\n" \
-			"  write-slot\tWrite image to slot and bypass all update logic\n" \
-			"\n" \
+			"List of rauc commands:\n"
+			"  bundle\tCreate a bundle\n"
+			"  resign\tResign an already signed bundle\n"
+			"  extract\tExtract the bundle content\n"
+			"  convert\tConvert classic to casync bundle\n"
+			"  checksum\tUpdate a manifest with checksums (and optionally sign it)\n"
+			"  install\tInstall a bundle\n"
+			"  info\t\tShow file information\n"
+#if ENABLE_SERVICE == 1
+			"  service\tStart RAUC service\n"
+#endif
+			"  status\tShow status\n"
+			"  write-slot\tWrite image to slot and bypass all update logic\n"
+			"\n"
 			"Environment variables:\n"
-			"  RAUC_PKCS11_MODULE  Library filename for PKCS#11 module (signing only)\n" \
+			"  RAUC_PKCS11_MODULE  Library filename for PKCS#11 module (signing only)\n"
 			"  RAUC_PKCS11_PIN     PIN to use for accessing PKCS#11 keys (signing only)");
 
 	if (!g_option_context_parse(context, &argc, &argv, &error)) {
@@ -1807,6 +1909,8 @@ static void cmdline_handler(int argc, char **argv)
 			r_context_conf()->keypath = keypath;
 		if (keyring)
 			r_context_conf()->keyringpath = keyring;
+		if (signing_keyring)
+			r_context_conf()->signing_keyringpath = signing_keyring;
 		if (intermediate)
 			r_context_conf()->intermediatepaths = intermediate;
 		if (mount)
