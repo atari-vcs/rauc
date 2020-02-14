@@ -1,3 +1,12 @@
+rauc (1.2-1ata1) vcs; urgency=medium
+
+  * Rebase debian/patches/atari/pass-system-version-to-bundle-install-hooks.patch
+  * Drop patches fixed upstream
+    + debian/patches/atari/allow-to-set-tmpdir-for-casync.patch
+    + debian/patches/apertis/0007-Disable-tests-that-depend-on-grub.patch
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Thu, 13 Feb 2020 15:34:07 +0000
+
 rauc (1.2-1) unstable; urgency=medium
 
   * New upstream release.

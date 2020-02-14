@@ -1,3 +1,4 @@
+From b4c44da9c355cf8ce7aa49dd14b7a3805f1f9779 Mon Sep 17 00:00:00 2001
 From: Christopher Obbard <chris.obbard@collabora.com>
 Date: Tue, 4 Feb 2020 13:12:55 +0000
 Subject: Pass system version to bundle install hooks
@@ -5,16 +6,19 @@ Subject: Pass system version to bundle install hooks
 Pass installed system version to bundle install-check hook script.
 
 Signed-off-by: Christopher Obbard <chris.obbard@collabora.com>
+
+Gbp-Pq: Topic atari
+Gbp-Pq: Name pass-system-version-to-bundle-install-hooks.patch
 ---
- src/install.c | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
+ src/install.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
 
 diff --git a/src/install.c b/src/install.c
-index d790218..2dd6ceb 100644
+index 3e5e44d..dc52e64 100644
 --- a/src/install.c
 +++ b/src/install.c
-@@ -688,6 +688,8 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
- 	GDataInputStream *datainstream = NULL;
+@@ -601,6 +601,8 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
+ 	g_autoptr(GDataInputStream) datainstream = NULL;
  	gboolean res = FALSE;
  	gchar *outline, *hookreturnmsg = NULL;
 +	g_autofree gchar *system_version = NULL;
@@ -22,7 +26,7 @@ index d790218..2dd6ceb 100644
  
  	g_assert_nonnull(manifest->hook_name);
  
-@@ -695,10 +697,21 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
+@@ -608,10 +610,21 @@ static gboolean run_bundle_hook(RaucManifest *manifest, gchar* bundledir, const
  
  	g_message("Running bundle hook %s", hook_cmd);
  
@@ -44,4 +48,3 @@ index d790218..2dd6ceb 100644
  
  	g_subprocess_launcher_setenv(launcher, "RAUC_MF_COMPATIBLE", manifest->update_compatible, TRUE);
  	g_subprocess_launcher_setenv(launcher, "RAUC_MF_VERSION", manifest->update_version ?: "", TRUE);
- 
