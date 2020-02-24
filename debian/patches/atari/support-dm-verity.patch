@@ -1,0 +1,109 @@
+From: Christopher Obbard <chris.obbard@collabora.com>
+Date: Mon, 24 Feb 2020 19:11:52 +0000
+Subject: initial WIP support for dm-verity partitions
+
+Currently device mapper devices get resolved to /dev/dm-0 which
+means the system does not know where it booted from.
+
+Add initial WIP support for dm-verity devices to resolve the
+booted device to the mapped data partition.
+
+Signed-off-by: Christopher Obbard <chris.obbard@collabora.com>
+---
+ src/context.c | 69 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 69 insertions(+)
+
+diff --git a/src/context.c b/src/context.c
+index 135c557..5382fdf 100644
+--- a/src/context.c
++++ b/src/context.c
+@@ -5,6 +5,7 @@
+ #include "context.h"
+ #include "network.h"
+ #include "signature.h"
++#include "utils.h"
+ 
+ RaucContext *context = NULL;
+ 
+@@ -23,6 +24,66 @@ static const gchar *regex_match(const gchar *pattern, const gchar *string)
+ 	return NULL;
+ }
+ 
++static const gchar* resolve_dm_device(gchar* dev)
++{
++	gchar *realdev = NULL;
++	gchar buf[PATH_MAX + 1];
++	gchar *tmp = NULL;
++	g_autoptr(GSubprocess) sproc = NULL;
++	GError *ierror = NULL;
++	GInputStream *instream;
++	g_autoptr(GDataInputStream) datainstream = NULL;
++	gchar* outline = NULL;
++	GPtrArray *args = g_ptr_array_new_full(4, g_free);
++	gchar **dmsetup_parts;
++
++	// get the output of `dmsetup table <dev>`
++	g_ptr_array_add(args, g_strdup("dmsetup"));
++	g_ptr_array_add(args, g_strdup("table"));
++	g_ptr_array_add(args, g_strdup(dev));
++	g_ptr_array_add(args, NULL);
++
++	sproc = r_subprocess_newv(args, G_SUBPROCESS_FLAGS_STDOUT_PIPE, &ierror);
++	if (sproc == NULL) {
++		// TODO handle error
++		return NULL;
++	}
++
++	// TODO handle like launch_and_wait_variables_handler ?
++	instream = g_subprocess_get_stdout_pipe(sproc);
++	datainstream = g_data_input_stream_new(instream);
++
++	outline = g_data_input_stream_read_line(datainstream, NULL, NULL, &ierror);
++	if (!outline) {
++		// TODO handle error
++		return NULL;
++	}
++
++	if (!g_subprocess_wait_check(sproc, NULL, &ierror)) {
++		// TODO handle error
++		return NULL;
++	}
++
++	// TODO clean up mess
++	// parse the output, see https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#example-of-full-mapping-table
++	// e.g. 0 2750000 verity 1 179:7 179:5 4096 4096 343750 1 sha256 <root_digest> <salt>
++	g_debug("dmsetup output: %s", outline);
++	dmsetup_parts = g_strsplit(outline, " ", -1);
++	if (g_str_equal(dmsetup_parts[2], "verity")) {
++		tmp = g_strconcat("/dev/block/", dmsetup_parts[4], NULL);
++		realdev = realpath(tmp, buf);
++		g_free(tmp);
++	} else {
++		// TODO support other device mapper types
++		realdev = g_strdup(dev);
++	}
++
++	g_strfreev(dmsetup_parts);
++	g_free(outline);
++
++	return realdev;
++}
++
+ static const gchar* get_cmdline_bootname(void)
+ {
+ 	g_autofree gchar *contents = NULL;
+@@ -82,6 +143,14 @@ static const gchar* get_cmdline_bootname(void)
+ 		return bootname;
+ 	}
+ 
++	/* check if booted from a device mapper device */
++	/* TODO in later versions, realpath() was replaced with a wrapper r_realpath,
++	   this mods should probably go inside r_realpath so every used path can be tested? */
++	if (g_str_has_prefix(realdev, "/dev/dm-")) {
++		g_debug("Booted from a device mapper device %s", realdev);
++		realdev = g_strdup(resolve_dm_device(realdev));
++	}
++
+ 	if (g_strcmp0(realdev, bootname) != 0) {
+ 		g_debug("Resolved bootname %s to %s", bootname, realdev);
+ 

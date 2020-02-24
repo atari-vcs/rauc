@@ -1,3 +1,9 @@
+rauc (1.2-1ata2) vcs; urgency=medium
+
+  * Add WIP version of debian/patches/atari/support-dm-verity.patch
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Mon, 24 Feb 2020 21:49:05 +0000
+
 rauc (1.2-1ata1) vcs; urgency=medium
 
   * Rebase debian/patches/atari/pass-system-version-to-bundle-install-hooks.patch
