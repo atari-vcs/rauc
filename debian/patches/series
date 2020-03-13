@@ -3,3 +3,4 @@ install-wrapper-to-pkgdatadir.patch
 fix-typos.patch
 atari/pass-system-version-to-bundle-install-hooks.patch
 atari/support-dm-verity.patch
+allow-custom-casync-convert-args.patch

@@ -1,3 +1,9 @@
+rauc (1.2-1ata3) vcs; urgency=medium
+
+  * Cherry-pick debian/patches/allow-custom-casync-convert-args.patch from upstream
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Fri, 13 Mar 2020 12:34:43 +0000
+
 rauc (1.2-1ata2) vcs; urgency=medium
 
   * Add WIP version of debian/patches/atari/support-dm-verity.patch
