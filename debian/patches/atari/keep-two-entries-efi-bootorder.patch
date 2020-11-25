@@ -1,0 +1,120 @@
+From: Christopher Obbard <chris.obbard@collabora.com>
+Date: Wed, 25 Nov 2020 15:27:46 +0000
+Subject: keep two entries in the EFI BootOrder variable
+
+The Atari VCS BIOS has a bug where if the EFI BootOrder variable
+doesn't contain all of the bootable ESPs (which are detected
+on each boot) the BIOS ignores the user-set order defined in the
+EFI BootOrder variable and reverts to booting from the first
+bootable disk.
+
+The practical implications of this bug are visible during an
+upgrade to slot B: if the upgrade fails or if the power is lost
+while the upgrade is in progress, there is only one entry in the
+BootOrder variable and the BIOS reverts back to booting from the
+first detected bootable slot: slot B. Early in the upgrade
+process the ESP was wiped and turned into a non-bootable dummy
+slot which only contains an entry to reboot into the BIOS. The
+dummy slot was implemented to prevent rollback attacks, the slot
+cannot be completely removed since RAUC requires all bootable
+slots to be present in the Boot**** EFI entires. In a "normal"
+system these entries are static, but on the Atari VCS BIOS the
+Boot**** EFI entries are built up on every boot so we always
+have to have two bootable ESPs present.
+
+The root-cause of this bug is still under investigation by Insyde,
+the BIOS developer, but in the mean time Insyde have suggested a
+workaround: make sure that all bootable entries are kept in the
+BootOrder EFI variable when modifying the variable from the OS.
+
+The only case when RAUC removes an entry from the BootOrder is
+as soon as an upgrade starts: the slot to install the upgrade is
+removed from the BootOrder variable preventing the system from
+booting a potentially mangled system. In our case this does not
+matter: both ESPs will always be present and bootable in the case
+of a bad upgrade.
+
+Once the upgrade is complete, RAUC sets BootNext to the newly
+installed slot: when the machine reboots the BIOS ignore the
+BootOrder variable and boots from the newly upgraded slot contained
+in the BootNext variable.
+
+Once the newly upgraded system boots, RAUC sets the BootOrder using
+efi_modify_persistent_bootorder (with slot set to the newly booted
+slot and prepend set to true) to create the entry at the beginning
+of the BootOrder.
+
+If the upgrade fails or power is removed from the VCS, there is one
+less entry in the BootOrder variable and the BIOS detects the
+mismatch between bootable ESPs and BootOrder, ignoring the user-defined
+BootOrder and reverts back to booting from the first bootable slot.
+
+The function efi_modify_persistent_bootorder always removes the slot
+from the BootOrder and only prepends the slot to the BootOrder when
+the prepend parameter is true. Modify the function so that we never
+end up removing slots from the boot order, but instead append the slot
+to the BootOrder list which keeps the BIOS happy.
+
+Signed-off-by: Christopher Obbard <chris.obbard@collabora.com>
+---
+ src/bootchooser.c | 36 ++++++++++++++++++++----------------
+ 1 file changed, 20 insertions(+), 16 deletions(-)
+
+diff --git a/src/bootchooser.c b/src/bootchooser.c
+index 4a0e948..aab9206 100644
+--- a/src/bootchooser.c
++++ b/src/bootchooser.c
+@@ -1213,26 +1213,29 @@ static gboolean efi_modify_persistent_bootorder(RaucSlot *slot, gboolean prepend
+ 		}
+ 	}
+ 
+-	if (prepend) {
+-		/* Iterate over full list to get entry to prepend to bootorder */
+-		for (GList *entry = all_entries; entry != NULL; entry = entry->next) {
+-			efi_bootentry *efi = entry->data;
+-			if (g_strcmp0(efi->name, slot->bootname) == 0) {
+-				efi_slot_entry = efi;
+-				break;
+-			}
++	/* Iterate over full list to get entry to prepend/append to bootorder */
++	for (GList *entry = all_entries; entry != NULL; entry = entry->next) {
++		efi_bootentry *efi = entry->data;
++		if (g_strcmp0(efi->name, slot->bootname) == 0) {
++			efi_slot_entry = efi;
++			break;
+ 		}
++	}
+ 
+-		if (!efi_slot_entry) {
+-			g_set_error(
+-					error,
+-					R_BOOTCHOOSER_ERROR,
+-					R_BOOTCHOOSER_ERROR_FAILED,
+-					"No entry for bootname '%s' found", slot->bootname);
+-			return FALSE;
+-		}
++	if (!efi_slot_entry) {
++		g_set_error(
++				error,
++				R_BOOTCHOOSER_ERROR,
++				R_BOOTCHOOSER_ERROR_FAILED,
++				"No entry for bootname '%s' found", slot->bootname);
++		return FALSE;
++	}
+ 
++	/* Prepend or append the entry to the boot list */
++	if (prepend) {
+ 		entries = g_list_prepend(entries, efi_slot_entry);
++	} else {
++		entries = g_list_append(entries, efi_slot_entry);
+ 	}
+ 
+ 	bootorder = g_ptr_array_sized_new(g_list_length(entries));
+@@ -1246,6 +1249,7 @@ static gboolean efi_modify_persistent_bootorder(RaucSlot *slot, gboolean prepend
+ 	/* No need to free the individual strings here as we only declared
+ 	 * pointers to already-existing string members of efi_bootentry items. */
+ 	order = g_strjoinv(",", (gchar**) g_ptr_array_free(bootorder, FALSE));
++	g_message("efi: setting bootorder to %s", order);
+ 
+ 	if (!efi_bootorder_set(order, NULL)) {
+ 		g_propagate_prefixed_error(error, ierror, "Modifying bootorder failed: ");

@@ -1,3 +1,10 @@
+rauc (1.2-1ata4) vcs; urgency=medium
+
+  * Add atari/keep-two-entries-efi-bootorder.patch to make sure two BootOrder
+    entries are always present when setting the BootOrder variable.
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Wed, 25 Nov 2020 15:40:29 +0000
+
 rauc (1.2-1ata3) vcs; urgency=medium
 
   * Cherry-pick debian/patches/allow-custom-casync-convert-args.patch from upstream
