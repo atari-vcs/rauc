@@ -1,3 +1,10 @@
+rauc (1.2-1ata5) vcs; urgency=medium
+
+  * d/p/atari/ignore-install-error-missing-slot-from-bootorder.patch
+    + Added. Ignore install error when slot is missing from bootorder.
+
+ -- Christopher Obbard <chris.obbard@collabora.com>  Tue, 19 Oct 2021 12:20:12 +0100
+
 rauc (1.2-1ata4) vcs; urgency=medium
 
   * Add atari/keep-two-entries-efi-bootorder.patch to make sure two BootOrder
