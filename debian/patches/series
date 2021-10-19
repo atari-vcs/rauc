@@ -5,3 +5,4 @@ atari/pass-system-version-to-bundle-install-hooks.patch
 atari/support-dm-verity.patch
 allow-custom-casync-convert-args.patch
 atari/keep-two-entries-efi-bootorder.patch
+atari/ignore-install-error-missing-slot-from-bootorder.patch
